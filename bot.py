@@ -21,20 +21,11 @@ async def on_ready():
 async def apply(ctx):
     user = ctx.author
 
-    # Safely attempt to delete the original command
-    try:
-        await ctx.message.delete()
-    except discord.Forbidden:
-        print("⚠️ Bot lacks permission to delete the message.")
-    except discord.HTTPException as e:
-        print(f"⚠️ Message deletion failed: {e}")
-
-    # Check that messages come from the correct user and are DMs
-    def check(m):
-        return m.author == user and isinstance(m.channel, discord.DMChannel)
-
     try:
         await user.send("📝 Let's begin your Valorant lobby application!")
+
+        def check(m):
+            return m.author == user and isinstance(m.channel, discord.DMChannel)
 
         await user.send("1️⃣ What's the name of your lobby?")
         lobby_name = await bot.wait_for("message", check=check, timeout=120)
@@ -61,62 +52,57 @@ async def apply(ctx):
         )
 
         mod_channel_id = 1389054759171919892
-        public_channel_id = 1389054777853345812
-        mod_channel = bot.get_channel(mod_channel_id)
-
-        if not mod_channel:
-            await user.send("⚠️ Could not find the moderator channel. Please contact an admin.")
-            return
-
-        message = await mod_channel.send(submission)
-
-        # Add approval/denial reactions
         try:
+            mod_channel = await bot.fetch_channel(mod_channel_id)
+            print("Fetched mod_channel:", mod_channel)
+        except Exception as e:
+            print(f"Failed to fetch mod channel: {e}")
+            mod_channel = None
+
+        if mod_channel:
+            message = await mod_channel.send(submission)
             await message.add_reaction("✅")
             await message.add_reaction("❌")
-        except discord.HTTPException as e:
-            print(f"⚠️ Reaction error: {e}")
-            await user.send("❌ Failed to add approval options. Please contact a moderator.")
-            return
 
-        await user.send("✅ Your lobby application has been submitted to the moderators.")
+            def reaction_check(reaction, reactor):
+                return (
+                    reaction.message.id == message.id and
+                    str(reaction.emoji) in ["✅", "❌"] and
+                    reactor.guild_permissions.manage_messages
+                )
 
-        def reaction_check(reaction, reactor):
-            return (
-                reaction.message.id == message.id and
-                str(reaction.emoji) in ["✅", "❌"] and
-                reactor.guild_permissions.manage_messages
-            )
+            try:
+                reaction, reactor = await bot.wait_for("reaction_add", check=reaction_check, timeout=3600)
 
-        try:
-            reaction, reactor = await bot.wait_for("reaction_add", check=reaction_check, timeout=3600)
+                if str(reaction.emoji) == "✅":
+                    public_channel_id = 1389106877371252816
+                    public_channel = await bot.fetch_channel(public_channel_id)
+                    if public_channel:
+                        await public_channel.send(
+                            f"✅ **Approved Lobby by {user.mention}**\n\n"
+                            f"**Lobby Name:** {lobby_name.content}\n"
+                            f"**Region:** {region.content}\n"
+                            f"**Maximum Players:** {player_count.content}\n"
+                            f"**Scheduled Start Time:** {start_time.content}\n"
+                            f"**Additional Notes:** {notes.content}"
+                        )
+                        await user.send("✅ Your lobby has been approved and posted!")
 
-            if str(reaction.emoji) == "✅":
-                public_channel = bot.get_channel(public_channel_id)
-                if public_channel:
-                    await public_channel.send(
-                        f"✅ **Approved Lobby by {user.mention}**\n\n"
-                        f"**Lobby Name:** {lobby_name.content}\n"
-                        f"**Region:** {region.content}\n"
-                        f"**Maximum Players:** {player_count.content}\n"
-                        f"**Scheduled Start Time:** {start_time.content}\n"
-                        f"**Additional Notes:** {notes.content}"
-                    )
-                    await user.send("✅ Your lobby has been approved and posted!")
-            elif str(reaction.emoji) == "❌":
-                await user.send("❌ Your lobby application was denied by a moderator.")
-        except asyncio.TimeoutError:
-            await user.send("⌛ The approval process timed out. Please try again later.")
+                elif str(reaction.emoji) == "❌":
+                    await user.send("❌ Your lobby application was denied by a moderator.")
 
+            except asyncio.TimeoutError:
+                print("⌛ No moderator reacted in time.")
+                await user.send("⌛ No response from moderators. Please check back later.")
+        else:
+            await user.send("⚠️ Could not find the moderator channel. Please contact an admin.")
+
+    except discord.Forbidden:
+        print("❌ Could not DM the user. They might have DMs off.")
     except asyncio.TimeoutError:
-        await user.send("⌛ Timeout reached. Please restart the application process with `?apply`.")
-    except discord.Forbidden:
-        print("⚠️ Couldn't send a DM. User may have DMs closed.")
-    except Exception as e:
-        print(f"❌ Unexpected error: {type(e).__name__}: {e}")
-    try:
-        await user.send(f"⚠️ Error: {type(e).__name__}: {e}")
-    except discord.Forbidden:
-        print("⚠️ Could not DM the user. They might have DMs turned off.")
+        try:
+            await user.send("⌛ You took too long to respond. Please restart with `?apply`.")
+        except discord.Forbidden:
+            print("❌ Timeout notice could not be sent. DMs are blocked.")
 
 bot.run(TOKEN)
